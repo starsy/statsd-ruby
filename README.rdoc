@@ -20,11 +20,15 @@ Bundler:
   $statsd.timing 'glork', 320
   $statsd.gauge 'bork', 100
 
+  # Send some stats with tags
+  $statsd.increment_tags 'crok', {host: 'host1', type: 'linux'}
+  $statsd.gauge_tags 'drok', {host: 'host1', type: 'linux'}
+
   # Use {#time} to time the execution of a block
   $statsd.time('account.activate') { @account.activate! }
 
   # Create a namespaced statsd client and increment 'account.activate'
-  statsd = Statsd.new('localhost').tap{|sd| sd.namespace = 'account'}
+  statsd = Statsd.new('localhost').tap {|sd| sd.namespace = 'account'}
   statsd.increment 'activate'
 
 = Testing
