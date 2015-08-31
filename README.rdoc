@@ -22,7 +22,7 @@ Bundler:
 
   # Send some stats with tags
   $statsd.increment_tags 'crok', {host: 'host1', type: 'linux'}
-  $statsd.gauge_tags 'drok', {host: 'host1', type: 'linux'}
+  $statsd.gauge_tags 'drok', {host: 'host1', type: 'linux'}, 10
 
   # Use {#time} to time the execution of a block
   $statsd.time('account.activate') { @account.activate! }
