@@ -53,13 +53,14 @@ class Statsd
       :postfix,
       :delimiter, :delimiter=
 
-    attr_accessor :batch_size
+    attr_accessor :batch_size, :tags
 
     # @param [Statsd] requires a configured Statsd instance
-    def initialize(statsd)
+    def initialize(statsd, tags = nil)
       @statsd = statsd
       @batch_size = statsd.batch_size
       @backlog = []
+      @tags = tags
     end
 
     # @yields [Batch] yields itself
@@ -287,8 +288,19 @@ class Statsd
   # @param [Numeric] sample_rate sample rate, 1 for always
   # @see #count
   def increment(stat, sample_rate=1)
-    count stat, 1, sample_rate
+    increment_tags stat, nil, sample_rate
   end
+
+  # Sends an increment (count = 1) for the given stat to the statsd server.
+  #
+  # @param [String] stat stat name
+  # @tags [Hash] tags tags to be used for stat
+  # @param [Numeric] sample_rate sample rate, 1 for always
+  # @see #count
+  def increment_tags(stat, tags, sample_rate=1)
+    count_tags stat, tags, 1, sample_rate
+  end
+
 
   # Sends a decrement (count = -1) for the given stat to the statsd server.
   #
@@ -296,7 +308,17 @@ class Statsd
   # @param [Numeric] sample_rate sample rate, 1 for always
   # @see #count
   def decrement(stat, sample_rate=1)
-    count stat, -1, sample_rate
+    decrement_tags stat, nil, sample_rate
+  end
+
+  # Sends a decrement (count = -1) for the given stat to the statsd server.
+  #
+  # @param [String] stat stat name
+  # @tags [Hash] tags tags to be used for stat
+  # @param [Numeric] sample_rate sample rate, 1 for always
+  # @see #count
+  def decrement_tags(stat, tags, sample_rate=1)
+    count_tags stat, tags, -1, sample_rate
   end
 
   # Sends an arbitrary count for the given stat to the statsd server.
@@ -305,7 +327,17 @@ class Statsd
   # @param [Integer] count count
   # @param [Numeric] sample_rate sample rate, 1 for always
   def count(stat, count, sample_rate=1)
-    send_stats stat, count, :c, sample_rate
+    count_tags stat, nil, count, sample_rate
+  end
+
+  # Sends an arbitrary count for the given stat to the statsd server.
+  #
+  # @param [String] stat stat name
+  # @tags [Hash] tags tags to be used for stat
+  # @param [Integer] count count
+  # @param [Numeric] sample_rate sample rate, 1 for always
+  def count_tags(stat, tags, count, sample_rate=1)
+    send_stats_tags stat, tags, count, :c, sample_rate
   end
 
   # Sends an arbitary gauge value for the given stat to the statsd server.
@@ -320,7 +352,23 @@ class Statsd
   # @example Report the current user count:
   #   $statsd.gauge('user.count', User.count)
   def gauge(stat, value, sample_rate=1)
-    send_stats stat, value, :g, sample_rate
+    gauge_tags(stat, nil, value, sample_rate)
+  end
+
+  # Sends an arbitary gauge value for the given stat to the statsd server.
+  #
+  # This is useful for recording things like available disk space,
+  # memory usage, and the like, which have different semantics than
+  # counters.
+  #
+  # @param [String] stat stat name.
+  # @tags [Hash] tags tags to be used for stat
+  # @param [Numeric] value gauge value.
+  # @param [Numeric] sample_rate sample rate, 1 for always
+  # @example Report the current user count:
+  #   $statsd.gauge('user.count', User.count)
+  def gauge_tags(stat, tags, value, sample_rate=1)
+    send_stats_tags stat, tags, value, :g, sample_rate
   end
 
   # Sends an arbitary set value for the given stat to the statsd server.
@@ -336,7 +384,24 @@ class Statsd
   # @example Report a deployment happening:
   #   $statsd.set('deployment', DEPLOYMENT_EVENT_CODE)
   def set(stat, value, sample_rate=1)
-    send_stats stat, value, :s, sample_rate
+    set_tags stat, nil, value, sample_rate
+  end
+
+  # Sends an arbitary set value for the given stat to the statsd server.
+  #
+  # This is for recording counts of unique events, which are useful to
+  # see on graphs to correlate to other values.  For example, a deployment
+  # might get recorded as a set, and be drawn as annotations on a CPU history
+  # graph.
+  #
+  # @param [String] stat stat name.
+  # @tags [Hash] tags tags to be used for stat
+  # @param [Numeric] value event value.
+  # @param [Numeric] sample_rate sample rate, 1 for always
+  # @example Report a deployment happening:
+  #   $statsd.set('deployment', DEPLOYMENT_EVENT_CODE)
+  def set_tags(stat, tags, value, sample_rate=1)
+    send_stats_tags stat, tags, value, :s, sample_rate
   end
 
   # Sends a timing (in ms) for the given stat to the statsd server. The
@@ -348,7 +413,20 @@ class Statsd
   # @param [Integer] ms timing in milliseconds
   # @param [Numeric] sample_rate sample rate, 1 for always
   def timing(stat, ms, sample_rate=1)
-    send_stats stat, ms, :ms, sample_rate
+    timing_tags stat, nil, ms, sample_rate
+  end
+
+  # Sends a timing (in ms) for the given stat to the statsd server. The
+  # sample_rate determines what percentage of the time this report is sent. The
+  # statsd server then uses the sample_rate to correctly track the average
+  # timing for the stat.
+  #
+  # @param [String] stat stat name
+  # @tags [Hash] tags tags to be used for stat
+  # @param [Integer] ms timing in milliseconds
+  # @param [Numeric] sample_rate sample rate, 1 for always
+  def timing_tags(stat, tags, ms, sample_rate=1)
+    send_stats_tags stat, tags, ms, :ms, sample_rate
   end
 
   # Reports execution time of the provided block using {#timing}.
@@ -360,9 +438,22 @@ class Statsd
   # @example Report the time (in ms) taken to activate an account
   #   $statsd.time('account.activate') { @account.activate! }
   def time(stat, sample_rate=1)
+    time_tags stat, nil, sample_rate
+  end
+
+  # Reports execution time of the provided block using {#timing}.
+  #
+  # @param [String] stat stat name
+  # @tags [Hash] tags tags to be used for stat
+  # @param [Numeric] sample_rate sample rate, 1 for always
+  # @yield The operation to be timed
+  # @see #timing
+  # @example Report the time (in ms) taken to activate an account
+  #   $statsd.time('account.activate') { @account.activate! }
+  def time_tags(stat, tags, sample_rate=1)
     start = Time.now
     result = yield
-    timing(stat, ((Time.now - start) * 1000).round, sample_rate)
+    timing_tags(stat, tags, ((Time.now - start) * 1000).round, sample_rate)
     result
   end
 
@@ -380,6 +471,21 @@ class Statsd
     Batch.new(self).easy &block
   end
 
+  # Creates and yields a Batch that can be used to batch instrument reports into
+  # larger packets. Batches are sent either when the packet is "full" (defined
+  # by batch_size), or when the block completes, whichever is the sooner.
+  #
+  # @tags [Hash] tags tags to be used for stat
+  # @yield [Batch] a statsd subclass that collects and batches instruments
+  # @example Batch two instument operations:
+  #   $statsd.batch do |batch|
+  #     batch.increment 'sys.requests'
+  #     batch.gauge('user.count', User.count)
+  #   end
+  def batch_tags(tags, &block)
+    Batch.new(self, tags).easy &block
+  end
+
   protected
 
   def send_to_socket(message)
@@ -393,12 +499,27 @@ class Statsd
   private
 
   def send_stats(stat, delta, type, sample_rate=1)
+    send_stats_tags stat, nil, delta, type, sample_rate
+  end
+
+  def send_stats_tags(stat, tags, delta, type, sample_rate=1)
     if sample_rate == 1 or rand < sample_rate
       # Replace Ruby module scoping with '.' and reserved chars (: | @) with underscores.
       stat = stat.to_s.gsub('::', delimiter).tr(':|@', '_')
+      _tags = nil
+      if tags.instance_of? Hash
+        tags.each {|k, v| _tags += ",#{escape_influxdb(k)}=#{escape_influxdb(v)}"}
+      elsif tags.instance_of? String
+        _tags = tags
+      end
+
       rate = "|@#{sample_rate}" unless sample_rate == 1
-      send_to_socket "#{prefix}#{stat}#{postfix}:#{delta}|#{type}#{rate}"
+      send_to_socket "#{prefix}#{stat}#{postfix}#{_tags}:#{delta}|#{type}#{rate}"
     end
+  end
+
+  def escape_influxdb(s)
+    s.gsub(/([,= ])/, "\\\\\\1")
   end
 
   def socket
